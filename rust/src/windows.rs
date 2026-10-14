@@ -1,4 +1,6 @@
 use enter_guard::*;
+use enter_guard::settings::Settings;
+use crate::{preferences, target::Target};
 use std::{
     cell::RefCell,
     mem::{size_of, zeroed},
@@ -16,6 +18,9 @@ const TOGGLE: usize = 101;
 const HIDE: usize = 102;
 const EXIT: usize = 103;
 const OPEN: usize = 104;
+const SETTINGS: usize = 105;
+const STARTUP: usize = 106;
+const KEY_BASE: usize = 200;
 struct State {
     hwnd: HWND,
     status: HWND,
@@ -23,11 +28,15 @@ struct State {
     help: HWND,
     hide: HWND,
     exit: HWND,
+    settings_button: HWND,
+    settings: Settings,
+    target: Target,
     hook: HHOOK,
     icon: HICON,
     font: HFONT,
     enabled: bool,
     hotkey: bool,
+    hotkey_id: i32,
     policies: [Policy; 2],
     failure: Option<String>,
     tray_added: bool,
@@ -43,11 +52,15 @@ impl Default for State {
             help: null_mut(),
             hide: null_mut(),
             exit: null_mut(),
+            settings_button: null_mut(),
+            settings: Settings::default(),
+            target: Target::default(),
             hook: null_mut(),
             icon: null_mut(),
             font: null_mut(),
             enabled: false,
             hotkey: false,
+            hotkey_id: 1,
             policies: Default::default(),
             failure: None,
             tray_added: false,
@@ -77,7 +90,7 @@ fn tray_data(hwnd: HWND, icon: HICON, enabled: bool) -> NOTIFYICONDATAW {
     n.uCallbackMessage = TRAY;
     n.hIcon = icon;
     let tip = wide(if enabled {
-        "EnterGuard：有効"
+        "EnterGuard：変換を要求中（動作保証なし）"
     } else {
         "EnterGuard：停止中"
     });
@@ -97,6 +110,7 @@ fn refresh() {
             s.failure.clone(),
         )
     });
+    let hotkey_label = format!("\r\nCtrl+Alt+F{} で停止（再開は画面から）", state(|s| s.settings.stop_key));
     let label = failure.unwrap_or_else(|| {
         if hook.is_null() {
             "キーボード監視を開始できません。置き換えは無効です。".into()
@@ -104,12 +118,12 @@ fn refresh() {
             format!(
                 "{}{}",
                 if enabled {
-                    "有効：Enterで改行／Ctrl+Enterで送信"
+                    "変換を要求中（動作保証なし）：Enter改行／Ctrl+Enter送信"
                 } else {
                     "停止中：Enterの動作を変更していません"
                 },
                 if hotkey {
-                    "\r\nCtrl+Alt+F10 で切り替え"
+                    &hotkey_label
                 } else {
                     "\r\nホットキーを登録できません。画面・通知領域から操作してください。"
                 }
@@ -126,18 +140,77 @@ fn refresh() {
         },
     );
     unsafe {
-        EnableWindow(button, (!hook.is_null()) as i32);
+        EnableWindow(button, (!hook.is_null() && state(|s| s.failure.is_none())) as i32);
         Shell_NotifyIconW(NIM_MODIFY, &tray_data(hwnd, icon, enabled));
     }
 }
-fn toggle() {
-    state(|s| {
-        if !s.hook.is_null() {
-            s.enabled = !s.enabled;
-            s.failure = None;
-        }
-    });
+fn stop() {
+    state(|s| s.enabled = false);
     refresh();
+}
+fn toggle() {
+    let (enabled, hook, faulted) = state(|s| (s.enabled, s.hook, s.failure.is_some()));
+    if enabled { stop(); return; }
+    if hook.is_null() || faulted { return; }
+    if pressed(VK_RETURN as i32) { return; }
+    // Reinstall on explicit activation. This is not a health check: Windows can
+    // still silently remove the new hook later. Never claim continuous protection.
+    if unsafe { UnhookWindowsHookEx(hook) } == 0 {
+        fail("フック解除を確認できません。再開せず、EnterGuardを終了して起動し直してください。".into());
+        return;
+    }
+    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), GetModuleHandleW(null()), 0) };
+    state(|s| s.hook = hook);
+    if hook.is_null() { fail("フックを再登録できません。EnterGuardを終了して起動し直してください。".into()); return; }
+    state(|s| s.enabled = true);
+    refresh();
+}
+fn settings_menu(hwnd: HWND) {
+    // Changing preferences always pauses transformations first.
+    stop();
+    unsafe {
+        let menu = CreatePopupMenu();
+        if menu.is_null() { return; }
+        let selected = state(|s| s.settings.stop_key);
+        for key in 8..=12 {
+            let label = format!("停止キー：Ctrl+Alt+F{key}");
+            AppendMenuW(menu, MF_STRING | if key == selected { MF_CHECKED } else { 0 }, KEY_BASE + key as usize, wide(&label).as_ptr());
+        }
+        let startup = preferences::autostart_enabled();
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+        AppendMenuW(menu, MF_STRING | if startup.as_ref().is_ok_and(|v| *v) { MF_CHECKED } else { 0 }, STARTUP, wide("Windowsログイン時に起動（必ず停止状態）").as_ptr());
+        let mut point = zeroed();
+        GetCursorPos(&mut point);
+        let command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, hwnd, null()) as usize;
+        DestroyMenu(menu);
+        if (KEY_BASE + 8..=KEY_BASE + 12).contains(&command) {
+            let next = Settings { stop_key: (command - KEY_BASE) as u8 };
+            if next.stop_key != selected {
+                // Register the replacement first; keep the previous key on conflict.
+                let old_id = state(|s| s.hotkey_id);
+                let new_id = if old_id == 1 { 2 } else { 1 };
+                let registered = RegisterHotKey(hwnd, new_id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F1 as u32 + next.stop_key as u32 - 1) != 0;
+                if !registered { notice(hwnd, "その停止キーは登録できません。以前の設定を維持します。"); }
+                else if let Err(e) = preferences::save(next) {
+                    UnregisterHotKey(hwnd, new_id);
+                    notice(hwnd, &format!("設定を保存できません。以前の停止キーを維持します：{e}"));
+                } else {
+                    if state(|s| s.hotkey) { UnregisterHotKey(hwnd, old_id); }
+                    // Alternate IDs so the old binding remains until replacement is ready.
+                    state(|s| { s.settings = next; s.hotkey = true; s.hotkey_id = new_id; });
+                }
+            }
+        } else if command == STARTUP {
+            match startup {
+                Ok(current) => if let Err(e) = preferences::set_autostart(!current) { notice(hwnd, &format!("自動起動設定を変更できません：{e}")); },
+                Err(e) => notice(hwnd, &format!("現在の自動起動設定を確認できないため変更しません：{e}")),
+            }
+        }
+    }
+    refresh();
+}
+fn notice(hwnd: HWND, message: &str) {
+    unsafe { MessageBoxW(hwnd, wide(message).as_ptr(), wide("EnterGuard").as_ptr(), MB_OK | MB_ICONWARNING); }
 }
 fn fail(reason: String) {
     let hwnd = state(|s| {
@@ -161,28 +234,6 @@ fn modifiers() -> Modifiers {
         windows: pressed(VK_LWIN as i32) || pressed(VK_RWIN as i32),
     }
 }
-fn discord(hwnd: HWND) -> bool {
-    if hwnd.is_null() {
-        return false;
-    }
-    // No PID cache: a reused PID or a failed lookup must never keep an old match.
-    unsafe {
-        let mut pid = 0;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == 0 {
-            return false;
-        }
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return false;
-        }
-        let mut buffer = [0u16; 32768];
-        let mut len = buffer.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut len);
-        CloseHandle(process);
-        ok != 0 && is_discord_path(&String::from_utf16_lossy(&buffer[..len as usize]))
-    }
-}
 unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if code >= 0 {
         let key = unsafe { &*(l as *const KBDLLHOOKSTRUCT) };
@@ -204,7 +255,7 @@ unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                 } else {
                     null_mut()
                 };
-                let is_discord = discord(foreground);
+                let is_discord = state(|s| s.target.matches(foreground));
                 let keypad = key.flags & LLKHF_EXTENDED != 0;
                 let action = state(|s| {
                     s.policies[keypad as usize].handle(down, enabled, is_discord, m, false)
@@ -230,7 +281,7 @@ fn remap(action: Action, m: Modifiers, keypad: bool, foreground: HWND) {
     let now = modifiers();
     if foreground.is_null()
         || unsafe { GetForegroundWindow() } != foreground
-        || !discord(foreground)
+        || !state(|s| s.target.matches(foreground))
         || now.shift != m.shift
         || now.left != m.left
         || now.right != m.right
@@ -288,6 +339,7 @@ fn menu(hwnd: HWND) {
         }
         AppendMenuW(menu, MF_STRING, OPEN, wide("画面を開く").as_ptr());
         AppendMenuW(menu, MF_STRING, TOGGLE, wide("有効／一時停止").as_ptr());
+        AppendMenuW(menu, MF_STRING, SETTINGS, wide("設定（変更時は停止）").as_ptr());
         AppendMenuW(menu, MF_STRING, EXIT, wide("終了").as_ptr());
         let mut p = zeroed();
         GetCursorPos(&mut p);
@@ -305,6 +357,7 @@ fn menu(hwnd: HWND) {
         match command {
             OPEN => show(hwnd),
             TOGGLE => toggle(),
+            SETTINGS => settings_menu(hwnd),
             EXIT => {
                 DestroyWindow(hwnd);
             }
@@ -322,7 +375,7 @@ fn layout(hwnd: HWND) {
         GetClientRect(hwnd, &mut r);
         let width = (r.right - px(40)).max(px(200));
         let bottom = r.bottom;
-        let help_height = (bottom - px(285)).max(px(160));
+        let help_height = (bottom - px(330)).max(px(160));
         let (status, help, button, hide, exit, old_font) =
             state(|s| (s.status, s.help, s.button, s.hide, s.exit, s.font));
         let font = CreateFontW(
@@ -341,7 +394,7 @@ fn layout(hwnd: HWND) {
             0,
             wide("Yu Gothic UI").as_ptr(),
         );
-        for control in [status, help, button, hide, exit] {
+        for control in [status, help, button, hide, exit, state(|s| s.settings_button)] {
             SendMessageW(control, WM_SETFONT, font as usize, 1);
         }
         state(|s| s.font = font);
@@ -350,11 +403,11 @@ fn layout(hwnd: HWND) {
         }
         MoveWindow(status, px(20), px(16), width, px(100), 1);
         MoveWindow(help, px(20), px(120), width, help_height, 1);
-        for (i, control) in [button, hide, exit].iter().enumerate() {
+        for (i, control) in [button, state(|s| s.settings_button), hide, exit].iter().enumerate() {
             MoveWindow(
                 *control,
                 px(20),
-                bottom - px(145 - i as i32 * 45),
+                bottom - px(190 - i as i32 * 45),
                 width,
                 px(36),
                 1,
@@ -367,12 +420,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         let (icon, enabled) = state(|s| (s.icon, s.enabled));
         let added = unsafe { Shell_NotifyIconW(NIM_ADD, &tray_data(hwnd, icon, enabled)) } != 0;
         state(|s| s.tray_added = added);
+        if !added { stop(); show(hwnd); }
         unsafe {
             EnableWindow(state(|s| s.hide), added as i32);
         }
         return 0;
     }
     match msg {
+        WM_TIMER if w == 2 => {
+            state(|s| s.target.refresh());
+            0
+        }
         WM_TIMER if w == 1 && state(|s| s.smoke) => {
             unsafe {
                 KillTimer(hwnd, 1);
@@ -408,6 +466,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_COMMAND => {
             match w & 0xffff {
                 TOGGLE => toggle(),
+            SETTINGS => settings_menu(hwnd),
                 HIDE => unsafe {
                     ShowWindow(hwnd, SW_HIDE);
                 },
@@ -419,8 +478,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             0
         }
         WM_HOTKEY => {
-            if w == 1 {
-                toggle();
+            if w == state(|s| s.hotkey_id) as usize {
+                stop();
             }
             0
         }
@@ -475,6 +534,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_DESTROY => {
             let (hook, hotkey, icon, font, added) = state(|s| {
                 s.enabled = false;
+                s.target.clear();
                 let hook = s.hook;
                 s.hook = null_mut();
                 (hook, s.hotkey, s.icon, s.font, s.tray_added)
@@ -484,7 +544,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                     UnhookWindowsHookEx(hook);
                 }
                 if hotkey {
-                    UnregisterHotKey(hwnd, 1);
+                    UnregisterHotKey(hwnd, state(|s| s.hotkey_id));
                 }
                 if added {
                     Shell_NotifyIconW(NIM_DELETE, &tray_data(hwnd, icon, false));
@@ -547,7 +607,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
-            wide("EnterGuard — Rust 試用版 0.2.0").as_ptr(),
+            wide("EnterGuard — Rust 試用版 0.2.1").as_ptr(),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -591,6 +651,7 @@ pub fn run() {
             0,
         );
         let button = create("BUTTON", "", WS_TABSTOP | BS_PUSHBUTTON as u32, TOGGLE);
+        let settings_button = create("BUTTON", "設定", WS_TABSTOP | BS_PUSHBUTTON as u32, SETTINGS);
         let hide = create(
             "BUTTON",
             "通知領域にしまう",
@@ -610,6 +671,7 @@ pub fn run() {
             s.button = button;
             s.hide = hide;
             s.exit = exit;
+            s.settings_button = settings_button;
             s.icon = icon;
             s.smoke = smoke;
             s.taskbar_message = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
@@ -619,14 +681,23 @@ pub fn run() {
         if !tray_added {
             EnableWindow(hide, 0);
         }
-        let hotkey =
-            RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F10 as u32) != 0;
+        if !smoke {
+            match preferences::load() {
+                Ok(settings) => state(|s| s.settings = settings),
+                Err(e) => notice(hwnd, &format!("設定を読み込めません。停止状態・初期停止キーで起動します：{e}")),
+            }
+        }
+        let stop_key = state(|s| s.settings.stop_key);
+        let hotkey = RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F1 as u32 + stop_key as u32 - 1) != 0;
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard), instance, 0);
         state(|s| {
             s.hotkey = hotkey;
             s.hook = hook;
             s.tray_added = tray_added;
         });
+        if SetTimer(hwnd, 2, 100, None) == 0 {
+            fail("対象アプリ確認タイマーを開始できないため停止しました。再起動してください。".into());
+        }
         layout(hwnd);
         refresh();
         ShowWindow(hwnd, SW_SHOW);
