@@ -25,7 +25,8 @@ pub fn autostart_enabled() -> io::Result<bool> {
     let mut buffer = vec![0u16; bytes as usize / 2];
     let result = unsafe { RegGetValueW(HKEY_CURRENT_USER, wide(RUN).as_ptr(), wide(VALUE).as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut bytes) };
     if result != ERROR_SUCCESS { return Err(io::Error::from_raw_os_error(result as i32)); }
-    Ok(buffer == wide(&command()?))
+    if buffer == wide(&command()?) { Ok(true) }
+    else { Err(io::Error::new(io::ErrorKind::InvalidData, "A different EnterGuard startup command exists; it was not changed")) }
 }
 pub fn set_autostart(enabled: bool) -> io::Result<()> {
     let mut key = std::ptr::null_mut();

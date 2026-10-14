@@ -45,3 +45,12 @@ Windows向けのクロスビルド成功は、実機動作の確認ではあり�
 - [ ] Discord再起動後の判定
 
 人間の実機確認が終わるまでチェック済みにしません。
+
+## v0.2.1 開発中の検証対象
+
+- 設定parse/serialize、F8〜F12制約、unknown/version違い/破損/過大ファイル、保存と上書き。
+- Windows smokeに停止操作の冪等性、異常状態で再有効化されないことを追加。
+- 独立UIA fixtureは本文を読まず自分のEdit/password metadataを確認。チャットと検索が同じEdit型であることを検証。
+- UIA/IMEの本体統合は未完成。fixture成功は実Discord/日本語IME検証を意味しない。詳しくはSAFETY-PROTOTYPE.md。
+- 自動起動の実ユーザーOS登録、ホットキー競合の実操作、実Discord/IME操作、100〜200%表示確認は未実施。
+- この追記時点では更新版WindowsCIの結果待ち。配布判定前に最終commitの実行結果を記録する。
