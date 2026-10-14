@@ -1,6 +1,6 @@
 use enter_guard::*;
 use enter_guard::settings::Settings;
-use crate::{preferences, target::Target};
+use crate::preferences;
 use std::{
     cell::RefCell,
     mem::{size_of, zeroed},
@@ -30,7 +30,6 @@ struct State {
     exit: HWND,
     settings_button: HWND,
     settings: Settings,
-    target: Target,
     hook: HHOOK,
     icon: HICON,
     font: HFONT,
@@ -54,7 +53,6 @@ impl Default for State {
             exit: null_mut(),
             settings_button: null_mut(),
             settings: Settings::default(),
-            target: Target::default(),
             hook: null_mut(),
             icon: null_mut(),
             font: null_mut(),
@@ -234,6 +232,28 @@ fn modifiers() -> Modifiers {
         windows: pressed(VK_LWIN as i32) || pressed(VK_RWIN as i32),
     }
 }
+fn discord(hwnd: HWND) -> bool {
+    if hwnd.is_null() {
+        return false;
+    }
+    // No PID cache: a reused PID or a failed lookup must never keep an old match.
+    unsafe {
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return false;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let mut buffer = [0u16; 32768];
+        let mut len = buffer.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut len);
+        CloseHandle(process);
+        ok != 0 && is_discord_path(&String::from_utf16_lossy(&buffer[..len as usize]))
+    }
+}
 unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if code >= 0 {
         let key = unsafe { &*(l as *const KBDLLHOOKSTRUCT) };
@@ -255,7 +275,7 @@ unsafe extern "system" fn keyboard(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                 } else {
                     null_mut()
                 };
-                let is_discord = state(|s| s.target.matches(foreground));
+                let is_discord = discord(foreground);
                 let keypad = key.flags & LLKHF_EXTENDED != 0;
                 let action = state(|s| {
                     s.policies[keypad as usize].handle(down, enabled, is_discord, m, false)
@@ -281,7 +301,7 @@ fn remap(action: Action, m: Modifiers, keypad: bool, foreground: HWND) {
     let now = modifiers();
     if foreground.is_null()
         || unsafe { GetForegroundWindow() } != foreground
-        || !state(|s| s.target.matches(foreground))
+        || !discord(foreground)
         || now.shift != m.shift
         || now.left != m.left
         || now.right != m.right
@@ -427,10 +447,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         return 0;
     }
     match msg {
-        WM_TIMER if w == 2 => {
-            state(|s| { if s.enabled { s.target.refresh(); } else { s.target.clear(); } });
-            0
-        }
         WM_TIMER if w == 1 && state(|s| s.smoke) => {
             unsafe {
                 KillTimer(hwnd, 1);
@@ -538,7 +554,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_DESTROY => {
             let (hook, hotkey, icon, font, added) = state(|s| {
                 s.enabled = false;
-                s.target.clear();
                 let hook = s.hook;
                 s.hook = null_mut();
                 (hook, s.hotkey, s.icon, s.font, s.tray_added)
@@ -699,9 +714,6 @@ pub fn run() {
             s.hook = hook;
             s.tray_added = tray_added;
         });
-        if SetTimer(hwnd, 2, 100, None) == 0 {
-            fail("対象アプリ確認タイマーを開始できないため停止しました。再起動してください。".into());
-        }
         layout(hwnd);
         refresh();
         ShowWindow(hwnd, SW_SHOW);

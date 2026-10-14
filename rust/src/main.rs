@@ -3,8 +3,6 @@
 mod windows;
 #[cfg(windows)]
 mod preferences;
-#[cfg(windows)]
-mod target;
 fn main() {
     #[cfg(windows)]
     windows::run();
