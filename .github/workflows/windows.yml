@@ -40,6 +40,9 @@ jobs:
           $p = Start-Process rust/target/x86_64-pc-windows-msvc/release/enter-guard.exe -ArgumentList '--smoke-test' -PassThru
           if (-not $p.WaitForExit(20000)) { $p.Kill(); throw 'Smoke test timed out' }
           if ($p.ExitCode -ne 0) { throw "Smoke test failed: $($p.ExitCode)" }
+      - name: Capture paused Windows UI
+        shell: pwsh
+        run: ./scripts/capture_ui.ps1
       - name: Prepare distribution and checksum
         shell: pwsh
         run: |
