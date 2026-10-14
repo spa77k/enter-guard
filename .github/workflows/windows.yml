@@ -27,6 +27,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Original .NET regression tests
         run: dotnet run --project tests/GuardLogic.Tests -c Release
+      - name: Isolated experimental UIA metadata fixture
+        run: dotnet run --project tests/SafetyPrototype -c Release
       - name: Build release executable
         working-directory: rust
         env:

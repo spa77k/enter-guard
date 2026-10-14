@@ -366,7 +366,7 @@ fn menu(hwnd: HWND) {
         PostMessageW(hwnd, WM_NULL, 0, 0);
     }
 }
-const HELP: &str = "Windows版 Discord（通常版）専用です。\r\n\r\n有効中、Discordが最前面のとき、Enterを改行（Shift+Enter）、Ctrl+Enterを送信（Enter）に置き換えます。長押しは1回だけ処理します。\r\n\r\n入力欄を識別しないため、検索・ダイアログ・通話画面にも作用します。ログイン・パスワード入力前は停止してください。Shift / Alt / Windowsキー付きの組み合わせは変更しません。\r\n\r\n日本語IMEの変換確定にも作用します。Windows実機・IME・Discord画面で未検証の試用版です。誤送信を防ぐ保証はありません。変換確定が必要なときは一時停止してください。\r\n\r\n大切な会話の前に、自分だけのテスト用チャンネルで確認してください。";
+const HELP: &str = "Windows版 Discord（通常版）専用です。\r\n\r\n有効中、Discordが最前面のとき、Enterを改行（Shift+Enter）、Ctrl+Enterを送信（Enter）に置き換えます。長押しは1回だけ処理します。\r\n\r\n入力欄を識別しないため、検索・ダイアログ・通話画面にも作用します。ログイン・パスワード入力前は停止してください。Shift / Alt / Windowsキー付きの組み合わせは変更しません。\r\n\r\n日本語IMEの変換確定にも作用します。Windows実機・IME・Discord画面で未検証の試用版です。誤送信を防ぐ保証はありません。変換確定が必要なときは一時停止してください。\r\n\r\n停止キーはCtrl+Alt+F10（設定で変更可能）。停止キーで再開はしません。設定から任意の自動起動も選べますが、起動直後は必ず停止中です。異常で停止した後は終了して起動し直してください。\r\n\r\n大切な会話の前に、自分だけのテスト用チャンネルで確認してください。";
 fn layout(hwnd: HWND) {
     unsafe {
         let dpi = GetDpiForWindow(hwnd).max(96);
@@ -428,7 +428,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
     }
     match msg {
         WM_TIMER if w == 2 => {
-            state(|s| s.target.refresh());
+            state(|s| { if s.enabled { s.target.refresh(); } else { s.target.clear(); } });
             0
         }
         WM_TIMER if w == 1 && state(|s| s.smoke) => {
@@ -441,7 +441,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                     && !s.icon.is_null()
                     && s.tray_added
                     && !s.font.is_null()
-                    && [s.status, s.help, s.button, s.hide, s.exit]
+                    && [s.status, s.help, s.button, s.hide, s.exit, s.settings_button]
                         .iter()
                         .all(|h| !h.is_null())
             });
@@ -453,12 +453,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             }
             toggle();
             let enabled = state(|s| s.enabled);
-            toggle();
+            stop();
+            stop();
             let paused = state(|s| !s.enabled);
+            fail("Smoke test: intentional fault".into());
+            toggle();
+            let fault_latched = state(|s| !s.enabled && s.failure.is_some());
             unsafe {
                 DestroyWindow(hwnd);
             }
-            if !enabled || !paused {
+            if !enabled || !paused || !fault_latched {
                 std::process::exit(3);
             }
             0
