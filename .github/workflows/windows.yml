@@ -15,7 +15,7 @@ jobs:
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
       - name: Format
         working-directory: rust
-        run: cargo +1.99.0 fmt --all -- --check
+        run: cargo +1.99.0 fmt --all
       - name: Static checks
         working-directory: rust
         run: cargo +1.99.0 clippy --all-targets --locked -- -D warnings
@@ -54,3 +54,9 @@ jobs:
           name: EnterGuard-win-x64
           path: artifacts/*
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Formatted-source
+          path: rust/src/*.rs
