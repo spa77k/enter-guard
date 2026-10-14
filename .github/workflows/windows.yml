@@ -1,0 +1,56 @@
+name: Windows Rust verification
+on:
+  push:
+    branches: [main, rust-port]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - name: Format
+        working-directory: rust
+        run: cargo +1.99.0 fmt --all -- --check
+      - name: Static checks
+        working-directory: rust
+        run: cargo +1.99.0 clippy --all-targets --locked -- -D warnings
+      - name: Rust tests including native input layout
+        working-directory: rust
+        run: cargo +1.99.0 test --all-targets --locked
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Original .NET regression tests
+        run: dotnet run --project tests/GuardLogic.Tests -c Release
+      - name: Build release executable
+        working-directory: rust
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
+        run: cargo +1.99.0 build --release --locked --target x86_64-pc-windows-msvc
+      - name: Windows lifecycle smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process rust/target/x86_64-pc-windows-msvc/release/enter-guard.exe -ArgumentList '--smoke-test' -PassThru
+          if (-not $p.WaitForExit(20000)) { $p.Kill(); throw 'Smoke test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Smoke test failed: $($p.ExitCode)" }
+      - name: Prepare distribution and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory artifacts -Force
+          Copy-Item rust/target/x86_64-pc-windows-msvc/release/enter-guard.exe artifacts/EnterGuard-win-x64.exe
+          $hash = (Get-FileHash artifacts/EnterGuard-win-x64.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  EnterGuard-win-x64.exe" | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
+          Get-Item artifacts/EnterGuard-win-x64.exe | Select-Object Name,Length
+          Get-Content artifacts/SHA256SUMS.txt
+      - name: Verify standalone PE and checksum
+        run: python scripts/verify_exe.py artifacts/EnterGuard-win-x64.exe artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EnterGuard-win-x64
+          path: artifacts/*
+          if-no-files-found: error
