@@ -4,7 +4,7 @@
 
 **Enterで改行、Ctrl+Enterで送信。** Windows向けの日本語キー変換ツールです。初版は通常版Discordのみ対応します。
 
-**v0.1.0は試用版です。Windows実機・Discord・日本語IMEでの動作確認は未完了です。誤送信を完全に防ぐものではありません。**
+**v0.2.0（Rust版）は試用版です。Windows実機・Discord・日本語IMEでの動作確認は未完了です。誤送信を完全に防ぐものではありません。**
 
 ## 動作
 
@@ -34,6 +34,8 @@
 
 コード署名なし。Windowsの警告が出る場合があります。
 
+Rust版でもキー変換仕様はv0.1.0と同じです。Discord内の入力欄・パスワード欄を識別しません。ログインやパスワード入力の前には必ず停止してください。
+
 ## 仕組みと制限
 
 Windowsの低レベルキーボードフックでEnterを扱い、前面プロセス名がDiscordの場合だけ、本人のキー操作をSendInputで置き換えます。Ctrl+Enterでは押されている左右Ctrlを一時解放し、Enterの後に復元します。注入失敗時は自動停止し、Enterを再送せず警告します。
@@ -59,7 +61,26 @@ Discord非公式の独立したユーティリティです。クライアント�
 
 ## ソースからビルド
 
-.NET 10 SDKが必要です。
+Rust版は `rust/` にあります。Windows 11 x64とVisual Studio Build ToolsのC++/Windows SDKが必要です。Rust 1.99.0を固定し、依存はCargo.lockで固定しています。
+
+```powershell
+cd rust
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+$env:RUSTFLAGS = "-C target-feature=+crt-static"
+cargo build --release --locked --target x86_64-pc-windows-msvc
+$process = Start-Process target/x86_64-pc-windows-msvc/release/enter-guard.exe -ArgumentList '--smoke-test' -PassThru -Wait
+$process.ExitCode # 0が成功。Discord/IMEを操作するテストではありません。
+```
+
+Windows APIによる日本語UI・通知領域・フックと独自アイコンを単一exeに含めます。.NET不要、CRTは静的リンクします。ビルド依存の更新時は再検証・再配布してください。macOS上ではOS独立のテストとWindows向け型チェックが可能ですが、exeの配布ビルドはWindows上で行います。
+
+GitHub ActionsではRustテスト・静的検査・既存.NETテスト・Windows x64の配布ビルド・起動/停止/終了の自動スモークテストを行い、exeとSHA256を成果物に保存します。
+
+### 旧.NET版（v0.1.0）
+
+既存の `src/EnterGuard` と `tests/GuardLogic.Tests`、v0.1.0リリースを保持しています。復旧時は旧リリースから取得できます。旧版のビルドには.NET 10 SDKが必要です。
 
 ```powershell
 dotnet run --project tests/GuardLogic.Tests -c Release
