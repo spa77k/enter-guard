@@ -47,6 +47,8 @@ jobs:
           "$hash  EnterGuard-win-x64.exe" | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
           Get-Item artifacts/EnterGuard-win-x64.exe | Select-Object Name,Length
           Get-Content artifacts/SHA256SUMS.txt
+      - name: Verify standalone PE and checksum
+        run: python scripts/verify_exe.py artifacts/EnterGuard-win-x64.exe artifacts/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: EnterGuard-win-x64
