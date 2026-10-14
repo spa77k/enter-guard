@@ -170,7 +170,7 @@ fn settings_menu(hwnd: HWND) {
         let menu = CreatePopupMenu();
         if menu.is_null() { return; }
         let selected = state(|s| s.settings.stop_key);
-        for key in 8..=12 {
+        for key in 8..=11 {
             let label = format!("停止キー：Ctrl+Alt+F{key}");
             AppendMenuW(menu, MF_STRING | if key == selected { MF_CHECKED } else { 0 }, KEY_BASE + key as usize, wide(&label).as_ptr());
         }
@@ -181,21 +181,26 @@ fn settings_menu(hwnd: HWND) {
         GetCursorPos(&mut point);
         let command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, hwnd, null()) as usize;
         DestroyMenu(menu);
-        if (KEY_BASE + 8..=KEY_BASE + 12).contains(&command) {
+        if (KEY_BASE + 8..=KEY_BASE + 11).contains(&command) {
             let next = Settings { stop_key: (command - KEY_BASE) as u8 };
-            if next.stop_key != selected {
+            if next.stop_key != selected || !state(|s| s.hotkey) {
                 // Register the replacement first; keep the previous key on conflict.
                 let old_id = state(|s| s.hotkey_id);
                 let new_id = if old_id == 1 { 2 } else { 1 };
                 let registered = RegisterHotKey(hwnd, new_id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F1 as u32 + next.stop_key as u32 - 1) != 0;
                 if !registered { notice(hwnd, "その停止キーは登録できません。以前の設定を維持します。"); }
                 else if let Err(e) = preferences::save(next) {
-                    UnregisterHotKey(hwnd, new_id);
+                    if UnregisterHotKey(hwnd, new_id) == 0 {
+                        fail("停止キーの登録取消を確認できません。終了して起動し直してください。".into());
+                    }
                     notice(hwnd, &format!("設定を保存できません。以前の停止キーを維持します：{e}"));
                 } else {
-                    if state(|s| s.hotkey) { UnregisterHotKey(hwnd, old_id); }
+                    let old_removed = !state(|s| s.hotkey) || UnregisterHotKey(hwnd, old_id) != 0;
                     // Alternate IDs so the old binding remains until replacement is ready.
                     state(|s| { s.settings = next; s.hotkey = true; s.hotkey_id = new_id; });
+                    if !old_removed {
+                        fail("以前の停止キーの解除を確認できません。終了して起動し直してください。".into());
+                    }
                 }
             }
         } else if command == STARTUP {
@@ -498,7 +503,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             0
         }
         WM_HOTKEY => {
-            if w == state(|s| s.hotkey_id) as usize {
+            if w == 1 || w == 2 {
                 stop();
             }
             0
@@ -563,7 +568,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                     UnhookWindowsHookEx(hook);
                 }
                 if hotkey {
-                    UnregisterHotKey(hwnd, state(|s| s.hotkey_id));
+                    UnregisterHotKey(hwnd, 1);
+                    UnregisterHotKey(hwnd, 2);
                 }
                 if added {
                     Shell_NotifyIconW(NIM_DELETE, &tray_data(hwnd, icon, false));

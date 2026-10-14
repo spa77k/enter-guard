@@ -28,6 +28,7 @@ jobs:
       - name: Original .NET regression tests
         run: dotnet run --project tests/GuardLogic.Tests -c Release
       - name: Isolated experimental UIA metadata fixture
+        timeout-minutes: 2
         run: dotnet run --project tests/SafetyPrototype -c Release
       - name: Build release executable
         working-directory: rust

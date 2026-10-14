@@ -29,6 +29,9 @@ pub fn autostart_enabled() -> io::Result<bool> {
     else { Err(io::Error::new(io::ErrorKind::InvalidData, "A different EnterGuard startup command exists; it was not changed")) }
 }
 pub fn set_autostart(enabled: bool) -> io::Result<()> {
+    // Re-read immediately before changing the value, not the menu's old snapshot.
+    // A command belonging to a different path is an error and is never replaced.
+    if autostart_enabled()? == enabled { return Ok(()); }
     let mut key = std::ptr::null_mut();
     let result = unsafe { RegCreateKeyExW(HKEY_CURRENT_USER, wide(RUN).as_ptr(), 0, null(), REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, null(), &mut key, std::ptr::null_mut()) };
     if result != ERROR_SUCCESS { return Err(io::Error::from_raw_os_error(result as i32)); }
