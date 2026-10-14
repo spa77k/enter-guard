@@ -53,4 +53,6 @@ Windows向けのクロスビルド成功は、実機動作の確認ではあり�
 - 独立UIA fixtureは本文を読まず自分のEdit/password metadataを確認。チャットと検索が同じEdit型であることを検証。
 - UIA/IMEの本体統合は未完成。fixture成功は実Discord/日本語IME検証を意味しない。詳しくはSAFETY-PROTOTYPE.md。
 - 自動起動の実ユーザーOS登録、ホットキー競合の実操作、実Discord/IME操作、100〜200%表示確認は未実施。
-- この追記時点では更新版WindowsCIの結果待ち。配布判定前に最終commitの実行結果を記録する。
+- 開発commit `b069d2f` の [Windows CI](https://github.com/spa77k/enter-guard/actions/runs/38618349619) は全工程成功。Rust 11 tests、旧.NET 1,154 assertions、UIA 48組合せ＋自作欄metadata、build、smoke、PE/依存検査を実行。
+- 同CIから取得した停止中UI画像を目視確認。720×800、標準倍率で文言と4ボタンの欠けなし。高DPI・設定メニュー・実利用画面は未確認。
+- 自動整形結果をソースへ反映し、最終検査はfmt --checkへ戻す。配布判定は最終commitでの再検証が必要。

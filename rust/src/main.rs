@@ -1,8 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #[cfg(windows)]
-mod windows;
-#[cfg(windows)]
 mod preferences;
+#[cfg(windows)]
+mod windows;
 fn main() {
     #[cfg(windows)]
     windows::run();
