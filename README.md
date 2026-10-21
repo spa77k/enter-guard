@@ -2,7 +2,12 @@
 
 ![EnterGuard icon](assets/EnterGuard.png)
 
-**Enterで改行、Ctrl+Enterで送信。** Windows向けの日本語キー変換ツールです。初版は通常版Discordのみ対応します。
+**Enterで改行、ショートカットで送信。** 通常版Discord向けの日本語キー変換ツールです。
+
+- **Mac（ソースコード）：** [ビルド・使い方](docs/MACOS.md) — Apple Silicon / Intel、⌘ Enterで送信。
+- **Windows（v0.2.1）：** 以下の手順 — Ctrl+Enterで送信。
+
+## Windows版
 
 **v0.2.1（Rust版）は試用版です。誤送信を完全に防ぐものではありません。**
 
@@ -31,7 +36,7 @@
 2. ページ下部の **Assets** から **`EnterGuard-win-x64.exe`** をクリックします。`Source code` は開発者向けなので、使うだけなら不要です。
 3. ダウンロードしたexeを、保管しておきたいフォルダーに置きます。
 
-対象は **Windows 11 x64＋通常版のデスクトップDiscord** です。macOS、スマートフォン、ブラウザー版Discord、Discord PTB／Canaryには対応していません。インストーラー・管理者権限・.NETの別インストールは不要です。
+このexeの対象は **Windows 11 x64＋通常版のデスクトップDiscord** です。Macでは[Mac版](docs/MACOS.md)を使用してください。スマートフォン、ブラウザー版Discord、Discord PTB／Canaryには対応していません。インストーラー・管理者権限・.NETの別インストールは不要です。
 
 > コード署名のない試用版なので、Windowsの警告が出る場合があります。配布元とファイル名を確認し、不安がある場合は実行を中止してください。
 

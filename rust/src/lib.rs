@@ -1,4 +1,5 @@
 //! OS-independent key policy and partial-insertion recovery, ported from v0.1.0.
+pub mod mac_policy;
 pub mod settings;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
